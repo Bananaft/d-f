@@ -20,7 +20,7 @@
             .hash = "1220f93ada1fa077ab096bf88a5b159ad421dbf6a478edec78ddb186d0c21d3476d9",
         },
         .sokol = .{
-            .url = "git+https://github.com/floooh/sokol-zig.git#d3e21f76498213d6d58179065756f5f2ed9b90cf",
+            .url = "git+https://github.com/floooh/sokol-zig.git#3443c2880afdcd8a6ecdd387174544e71c85ba87",
             .hash = "122052a192829b377c637ce242ee8c9121e03d8cd10c889758dc6fb176368de7d67b",
         },
         .zstbi = .{
