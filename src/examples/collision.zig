@@ -18,6 +18,8 @@ const Vec2 = math.Vec2;
 const Rect = delve.spatial.Rect;
 const TextureRegion = delve.graphics.sprites.TextureRegion;
 
+const def_shader = delve.shaders.default;
+
 var shader_default: graphics.Shader = undefined;
 var sprite_batch: batcher.SpriteBatcher = undefined;
 
@@ -36,7 +38,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try registerModule();
@@ -57,13 +60,12 @@ pub fn registerModule() !void {
 
 fn on_init() !void {
     debug.log("Collision example module initializing", .{});
+    shader_default = try graphics.Shader.initDefault(.{});
 
     sprite_batch = batcher.SpriteBatcher.init(.{}) catch {
         debug.showErrorScreen("Fatal error during batch init!");
         return;
     };
-
-    shader_default = graphics.Shader.initDefault(.{});
 
     graphics.setClearColor(colors.examples_bg_light);
 }

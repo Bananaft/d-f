@@ -24,7 +24,7 @@ const FSParams = graphics.FSDefaultUniforms;
 const vertex_layout = getVertexLayout();
 
 pub const MeshConfig = struct {
-    material: ?graphics.Material = null,
+    material: graphics.Material,
 };
 
 pub fn init() !void {
@@ -43,6 +43,7 @@ pub const Mesh = struct {
     bounds: boundingbox.BoundingBox = undefined,
 
     has_skin: bool = false,
+
     zmesh_data: ?*zmesh.io.zcgltf.Data = null,
 
     pub fn initFromFile(allocator: std.mem.Allocator, filename: [:0]const u8, cfg: MeshConfig) ?Mesh {
@@ -64,6 +65,9 @@ pub const Mesh = struct {
         defer mesh_positions.deinit();
         defer mesh_normals.deinit();
         defer mesh_texcoords.deinit();
+        defer mesh_tangents.deinit();
+        defer mesh_joints.deinit();
+        defer mesh_weights.deinit();
 
         for (0..data.meshes_count) |i| {
             const mesh = data.meshes.?[i];
@@ -92,11 +96,16 @@ pub const Mesh = struct {
             debug.log("Could not process mesh file!", .{});
             return null;
         };
+        defer allocator.free(vertices);
+
+        const white_color = colors.white.toArray();
 
         for (mesh_positions.items, 0..) |vert, i| {
             vertices[i].x = vert[0];
             vertices[i].y = vert[1];
             vertices[i].z = vert[2];
+
+            vertices[i].color = white_color;
 
             if (mesh_texcoords.items.len > i) {
                 vertices[i].u = mesh_texcoords.items[i][0];
@@ -107,13 +116,7 @@ pub const Mesh = struct {
             }
         }
 
-        var material: graphics.Material = undefined;
-        if (cfg.material == null) {
-            const tex = graphics.createDebugTexture();
-            material = graphics.Material.init(.{ .texture_0 = tex });
-        } else {
-            material = cfg.material.?;
-        }
+        const material: graphics.Material = cfg.material;
 
         // Fill in normals if none were given, to match vertex layout
         if (mesh_normals.items.len == 0) {
@@ -152,7 +155,6 @@ pub const Mesh = struct {
         if (self.zmesh_data) |mesh_data| {
             zmesh.io.freeData(mesh_data);
         }
-
         self.bindings.destroy();
     }
 
@@ -162,8 +164,8 @@ pub const Mesh = struct {
     }
 
     /// Draw this mesh, using the specified material instead of the set one
-    pub fn drawWithMaterial(self: *Mesh, material: *graphics.Material, cam_matrices: CameraMatrices, model_matrix: math.Mat4) void {
-        graphics.drawWithMaterial(&self.bindings, material, cam_matrices, model_matrix);
+    pub fn drawWithMaterial(self: *Mesh, material: graphics.Material, cam_matrices: CameraMatrices, model_matrix: math.Mat4) void {
+        graphics.drawWithMaterial(&self.bindings, @constCast(&material), cam_matrices, model_matrix);
     }
 };
 
@@ -255,7 +257,7 @@ pub fn getSkinnedVertexLayout() graphics.VertexLayout {
 pub fn getShaderAttributes() []const graphics.ShaderAttribute {
     return &[_]graphics.ShaderAttribute{
         .{ .name = "pos", .attr_type = .FLOAT3, .binding = .VERT_PACKED },
-        .{ .name = "color0", .attr_type = .UBYTE4N, .binding = .VERT_PACKED },
+        .{ .name = "color0", .attr_type = .FLOAT4, .binding = .VERT_PACKED },
         .{ .name = "texcoord0", .attr_type = .FLOAT2, .binding = .VERT_PACKED },
         .{ .name = "normals", .attr_type = .FLOAT3, .binding = .VERT_NORMALS },
         .{ .name = "tangents", .attr_type = .FLOAT4, .binding = .VERT_TANGENTS },
@@ -265,7 +267,7 @@ pub fn getShaderAttributes() []const graphics.ShaderAttribute {
 pub fn getSkinnedShaderAttributes() []const graphics.ShaderAttribute {
     return &[_]graphics.ShaderAttribute{
         .{ .name = "pos", .attr_type = .FLOAT3, .binding = .VERT_PACKED },
-        .{ .name = "color0", .attr_type = .UBYTE4N, .binding = .VERT_PACKED },
+        .{ .name = "color0", .attr_type = .FLOAT4, .binding = .VERT_PACKED },
         .{ .name = "texcoord0", .attr_type = .FLOAT2, .binding = .VERT_PACKED },
         .{ .name = "normals", .attr_type = .FLOAT3, .binding = .VERT_NORMALS },
         .{ .name = "tangents", .attr_type = .FLOAT4, .binding = .VERT_TANGENTS },
@@ -296,13 +298,13 @@ pub const MeshBuilder = struct {
         const v = 0.0;
         const u_2 = 1.0;
         const v_2 = 1.0;
-        const color_i = color.toInt();
+        const color_array = color.toArray();
 
         const verts = &[_]PackedVertex{
-            .{ .x = v0.x, .y = v0.y, .z = 0, .color = color_i, .u = u, .v = v_2 },
-            .{ .x = v1.x, .y = v1.y, .z = 0, .color = color_i, .u = u_2, .v = v_2 },
-            .{ .x = v2.x, .y = v2.y, .z = 0, .color = color_i, .u = u_2, .v = v },
-            .{ .x = v3.x, .y = v3.y, .z = 0, .color = color_i, .u = u, .v = v },
+            .{ .x = v0.x, .y = v0.y, .z = 0, .color = color_array, .u = u, .v = v_2 },
+            .{ .x = v1.x, .y = v1.y, .z = 0, .color = color_array, .u = u_2, .v = v_2 },
+            .{ .x = v2.x, .y = v2.y, .z = 0, .color = color_array, .u = u_2, .v = v },
+            .{ .x = v3.x, .y = v3.y, .z = 0, .color = color_array, .u = u, .v = v },
         };
 
         const indices = &[_]u32{ 0, 1, 2, 0, 2, 3 };
@@ -338,12 +340,12 @@ pub const MeshBuilder = struct {
         const v = 0.0;
         const u_2 = 1.0;
         const v_2 = 1.0;
-        const color_i = color.toInt();
+        const color_a = color.toArray();
 
         const verts = &[_]PackedVertex{
-            .{ .x = v0.x, .y = v0.y, .z = v0.z, .color = color_i, .u = u, .v = v_2 },
-            .{ .x = v1.x, .y = v1.y, .z = v1.z, .color = color_i, .u = u_2, .v = v_2 },
-            .{ .x = v2.x, .y = v2.y, .z = v2.z, .color = color_i, .u = u_2, .v = v },
+            .{ .x = v0.x, .y = v0.y, .z = v0.z, .color = color_a, .u = u, .v = v_2 },
+            .{ .x = v1.x, .y = v1.y, .z = v1.z, .color = color_a, .u = u_2, .v = v_2 },
+            .{ .x = v2.x, .y = v2.y, .z = v2.z, .color = color_a, .u = u_2, .v = v },
         };
 
         const normal = v0.cross(v1).mulMat4(transform).norm().toArray();

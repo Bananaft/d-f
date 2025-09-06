@@ -24,6 +24,9 @@ const Color = colors.Color;
 const lit_shader = delve.shaders.default_basic_lighting;
 const skinned_lit_shader = delve.shaders.default_skinned_basic_lighting;
 
+var skinned_shader: graphics.Shader = undefined;
+var static_shader: graphics.Shader = undefined;
+
 var animated_mesh: skinned_mesh.SkinnedMesh = undefined;
 var animation: skinned_mesh.PlayingAnimation = undefined;
 
@@ -36,9 +39,10 @@ const mesh_texture_file = "assets/meshes/CesiumMan.png";
 var cube1: delve.graphics.mesh.Mesh = undefined;
 var cube2: delve.graphics.mesh.Mesh = undefined;
 
-// This example shows an example of some simple lighting in a shader
+var skinned_mesh_material: delve.platform.graphics.Material = undefined;
+var static_mesh_material: delve.platform.graphics.Material = undefined;
 
-// Web build note: this does not seem to work when built in --release=fast or --release=small
+// This example shows an example of some simple lighting in a shader
 
 pub fn main() !void {
     // Pick the allocator to use depending on platform
@@ -48,7 +52,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try registerModule();
@@ -75,19 +80,18 @@ fn on_init() !void {
     // Make a perspective camera, with a 90 degree FOV
     camera = cam.Camera.initThirdPerson(90.0, 0.01, 150.0, 2.0, Vec3.up);
     camera.position = Vec3.new(0.0, 0.0, 0.0);
-    camera.direction = Vec3.new(0.0, 0.0, 1.0);
 
     // make shaders for skinned and unskinned meshes
-    const skinned_shader = graphics.Shader.initFromBuiltin(.{ .vertex_attributes = skinned_mesh.getSkinnedShaderAttributes() }, skinned_lit_shader);
-
-    const static_shader = graphics.Shader.initFromBuiltin(.{ .vertex_attributes = delve.graphics.mesh.getShaderAttributes() }, lit_shader);
+    skinned_shader = try graphics.Shader.initFromBuiltin(.{ .vertex_attributes = skinned_mesh.getSkinnedShaderAttributes() }, skinned_lit_shader);
+    static_shader = try graphics.Shader.initFromBuiltin(.{ .vertex_attributes = delve.graphics.mesh.getShaderAttributes() }, lit_shader);
 
     var base_img: images.Image = try images.loadFile(mesh_texture_file);
-    const tex_base = graphics.Texture.init(&base_img);
+    defer base_img.deinit();
+    const tex_base = graphics.Texture.init(base_img);
 
     // Create a material out of our shader and textures
-    const skinned_mesh_material = delve.platform.graphics.Material.init(.{
-        .shader = skinned_shader.?,
+    skinned_mesh_material = try delve.platform.graphics.Material.init(.{
+        .shader = skinned_shader,
         .texture_0 = tex_base,
         .texture_1 = delve.platform.graphics.createSolidTexture(0x00000000),
 
@@ -99,8 +103,8 @@ fn on_init() !void {
     });
 
     // Create a material out of the texture
-    const static_mesh_material = graphics.Material.init(.{
-        .shader = static_shader.?,
+    static_mesh_material = try graphics.Material.init(.{
+        .shader = static_shader,
         .texture_0 = delve.platform.graphics.createSolidTexture(0xFFFFFFFF),
         .texture_1 = delve.platform.graphics.createSolidTexture(0x00000000),
 
@@ -158,14 +162,16 @@ fn on_draw() void {
 
     const point_lights = &[_]delve.platform.graphics.PointLight{ point_light_1, point_light_2, point_light_3 };
 
-    // add the lights and camera to the materials
-    animated_mesh.mesh.material.params.point_lights = @constCast(point_lights);
-    animated_mesh.mesh.material.params.directional_light = directional_light;
-    animated_mesh.mesh.material.params.ambient_light = colors.Color.new(0.02, 0.02, 0.05, 1.0);
+    // create the light params to draw with
+    const light_params: graphics.MaterialLightParams = .{
+        .point_lights = @constCast(point_lights),
+        .directional_light = directional_light,
+        .ambient_light = colors.Color.new(0.02, 0.02, 0.05, 1.0),
+    };
 
-    // copy over the material params to the cube mesh too
-    cube1.material.params = animated_mesh.mesh.material.params;
-    cube2.material.params = animated_mesh.mesh.material.params;
+    // add set the light params to the materials
+    static_mesh_material.state.params.lighting = light_params;
+    skinned_mesh_material.state.params = static_mesh_material.state.params;
 
     animated_mesh.draw(view_mats, model);
     cube1.draw(view_mats, Mat4.identity);
@@ -174,6 +180,12 @@ fn on_draw() void {
 
 fn on_cleanup() !void {
     debug.log("Lighting example module cleaning up", .{});
+
+    skinned_shader.destroy();
+    static_shader.destroy();
+
+    skinned_mesh_material.deinit();
+    static_mesh_material.deinit();
 
     animation.deinit();
     animated_mesh.deinit();

@@ -33,7 +33,7 @@ const BatcherConfig = struct {
     min_indices: usize = 128,
     texture: ?graphics.Texture = null,
     shader: ?graphics.Shader = null,
-    material: ?*graphics.Material = null,
+    material: ?graphics.Material = null,
     flip_tex_y: bool = false,
 };
 
@@ -47,7 +47,10 @@ pub const SpriteBatcher = struct {
     current_batch_key: u64 = 0,
     current_tex: graphics.Texture = undefined,
     current_shader: graphics.Shader = undefined,
-    current_material: ?*graphics.Material = null,
+    current_material: ?graphics.Material = null,
+
+    // If we needed to make resources, we need to clean them up later too
+    owned_texture: ?graphics.Texture = null,
 
     /// Creates a new SpriteBatcher using the given config
     pub fn init(cfg: BatcherConfig) !SpriteBatcher {
@@ -58,8 +61,12 @@ pub const SpriteBatcher = struct {
         const tex = if (cfg.texture != null) cfg.texture.? else graphics.createDebugTexture();
         sprite_batcher.current_tex = tex;
 
-        const shader = if (cfg.shader != null) cfg.shader.? else graphics.Shader.initDefault(.{});
+        // Use either the configured shader, or fall back to the default
+        const shader = if (cfg.shader != null) cfg.shader.? else graphics.getDefaultShader();
         sprite_batcher.useShader(shader);
+
+        if (cfg.texture == null)
+            sprite_batcher.owned_texture = tex;
 
         return sprite_batcher;
     }
@@ -87,7 +94,7 @@ pub const SpriteBatcher = struct {
     }
 
     /// Switch the current batch to one for the given material
-    pub fn useMaterial(self: *SpriteBatcher, material: *graphics.Material) void {
+    pub fn useMaterial(self: *SpriteBatcher, material: graphics.Material) void {
         self.current_batch_key = makeSpriteBatchKeyFromMaterial(material);
         self.current_material = material;
     }
@@ -193,6 +200,11 @@ pub const SpriteBatcher = struct {
         while (it.next()) |batcher| {
             batcher.value_ptr.deinit();
         }
+        self.batches.deinit();
+
+        if (self.owned_texture) |*tex| {
+            tex.destroy();
+        }
     }
 
     /// Update the transform matrix for the batches
@@ -213,11 +225,8 @@ fn makeSpriteBatchKey(tex: graphics.Texture, shader: graphics.Shader) u64 {
     return tex.handle + (shader.handle * 1000000);
 }
 
-fn makeSpriteBatchKeyFromMaterial(material: *const graphics.Material) u64 {
-    // Hash the material, just like an auto map would.
-    var hasher = Wyhash.init(0);
-    autoHash(&hasher, material);
-    return hasher.final();
+fn makeSpriteBatchKeyFromMaterial(material: graphics.Material) u64 {
+    return @intCast(@intFromPtr(material.state));
 }
 
 /// Handles drawing a batch of primitive shapes all with the same texture / shader
@@ -229,13 +238,14 @@ pub const Batcher = struct {
     index_pos: usize,
     bindings: graphics.Bindings,
     shader: graphics.Shader,
-    material: ?*graphics.Material = null,
+    material: ?graphics.Material = null,
     transform: Mat4 = Mat4.identity,
     flip_tex_y: bool = false,
 
     /// Setup and return a new Batcher
     pub fn init(cfg: BatcherConfig) !Batcher {
         var allocator = mem.getAllocator();
+
         var batcher: Batcher = Batcher{
             .allocator = allocator,
             .vertex_pos = 0,
@@ -243,7 +253,7 @@ pub const Batcher = struct {
             .vertex_buffer = try allocator.alloc(Vertex, cfg.min_vertices),
             .index_buffer = try allocator.alloc(u32, cfg.min_indices),
             .bindings = graphics.Bindings.init(.{ .updatable = true, .index_len = cfg.min_indices, .vert_len = cfg.min_vertices }),
-            .shader = if (cfg.shader != null) cfg.shader.? else graphics.Shader.initDefault(.{}),
+            .shader = if (cfg.shader != null) cfg.shader.? else graphics.getDefaultShader(),
             .material = if (cfg.material != null) cfg.material.? else null,
             .flip_tex_y = cfg.flip_tex_y,
         };
@@ -292,13 +302,13 @@ pub const Batcher = struct {
         const v = region.v;
         const u_2 = region.u_2;
         const v_2 = region.v_2;
-        const color_i = color.toInt();
+        const color_a = color.toArray();
 
         const verts = &[_]Vertex{
-            .{ .x = v0.x, .y = v0.y, .z = 0, .color = color_i, .u = u, .v = v_2 },
-            .{ .x = v1.x, .y = v1.y, .z = 0, .color = color_i, .u = u_2, .v = v_2 },
-            .{ .x = v2.x, .y = v2.y, .z = 0, .color = color_i, .u = u_2, .v = v },
-            .{ .x = v3.x, .y = v3.y, .z = 0, .color = color_i, .u = u, .v = v },
+            .{ .x = v0.x, .y = v0.y, .z = 0, .color = color_a, .u = u, .v = v_2 },
+            .{ .x = v1.x, .y = v1.y, .z = 0, .color = color_a, .u = u_2, .v = v_2 },
+            .{ .x = v2.x, .y = v2.y, .z = 0, .color = color_a, .u = u_2, .v = v },
+            .{ .x = v3.x, .y = v3.y, .z = 0, .color = color_a, .u = u, .v = v },
         };
 
         const indices = &[_]u32{ 0, 1, 2, 0, 2, 3 };
@@ -379,12 +389,12 @@ pub const Batcher = struct {
             return;
         };
 
-        const color_i = color.toInt();
+        const color_a = color.toArray();
 
         const verts = &[_]Vertex{
-            .{ .x = v0.x, .y = v0.y, .z = 0, .color = color_i, .u = uv0.x, .v = uv0.y },
-            .{ .x = v1.x, .y = v1.y, .z = 0, .color = color_i, .u = uv1.x, .v = uv1.y },
-            .{ .x = v2.x, .y = v2.y, .z = 0, .color = color_i, .u = uv2.x, .v = uv2.y },
+            .{ .x = v0.x, .y = v0.y, .z = 0, .color = color_a, .u = uv0.x, .v = uv0.y },
+            .{ .x = v1.x, .y = v1.y, .z = 0, .color = color_a, .u = uv1.x, .v = uv1.y },
+            .{ .x = v2.x, .y = v2.y, .z = 0, .color = color_a, .u = uv2.x, .v = uv2.y },
         };
 
         const indices = &[_]u32{ 0, 1, 2 };
@@ -469,6 +479,7 @@ pub const Batcher = struct {
             .projViewMatrix = cam_matrices.proj.mul(cam_matrices.view),
             .modelMatrix = model_matrix,
             .in_color = .{ 1.0, 1.0, 1.0, 1.0 },
+            .texture_pan = .{ 0.0, 0.0, 0.0, 0.0 },
         };
 
         const fs_params = FSParams{
@@ -490,7 +501,7 @@ pub const Batcher = struct {
         if (self.material == null)
             return;
 
-        graphics.drawWithMaterial(&self.bindings, self.material.?, cam_matrices, model_matrix);
+        graphics.drawWithMaterial(&self.bindings, &self.material.?, cam_matrices, model_matrix);
     }
 
     /// Expand the buffers for this batch if needed to fit the new size
@@ -503,7 +514,6 @@ pub const Batcher = struct {
         var needs_resize = false;
 
         if (self.vertex_buffer.len < needed_vertices) {
-            // debug.log("Growing vertex buffer to {d}", .{self.vertex_buffer.len * 2});
             self.vertex_buffer = self.allocator.realloc(self.vertex_buffer, self.vertex_buffer.len * 2) catch {
                 debug.log("Could not allocate needed vertices! Needed {d}", .{needed_vertices});
                 return;
@@ -511,7 +521,6 @@ pub const Batcher = struct {
             needs_resize = true;
         }
         if (self.index_buffer.len < needed_indices) {
-            // debug.log("Growing index buffer to {d}", .{self.index_buffer.len * 2});
             self.index_buffer = self.allocator.realloc(self.index_buffer, self.index_buffer.len * 2) catch {
                 debug.log("Could not allocate needed indices! Needed {d}", .{needed_indices});
                 return;
@@ -522,7 +531,6 @@ pub const Batcher = struct {
         if (!needs_resize)
             return;
 
-        // debug.log("Resizing buffer to {d}x{d}", .{self.vertex_buffer.len, self.index_buffer.len});
         self.bindings.resize(self.vertex_buffer.len, self.index_buffer.len);
     }
 };

@@ -50,7 +50,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try registerModule();
@@ -188,10 +189,10 @@ fn on_init() !void {
         return;
     };
 
-    tex_treesheet = graphics.Texture.init(&treesheet_img);
+    tex_treesheet = graphics.Texture.init(treesheet_img);
 
     // make our default shader
-    shader_blend = graphics.Shader.initDefault(.{ .blend_mode = .NONE, .cull_mode = .NONE });
+    shader_blend = try graphics.Shader.initDefault(.{ .blend_mode = .NONE, .cull_mode = .NONE });
 
     // set the sky color
     graphics.setClearColor(sky_color);
@@ -220,7 +221,7 @@ fn pre_draw() void {
     time += papp.getCurrentDeltaTime();
 
     // set up a matrix that will billboard to face the camera, but ignore the up dir
-    const billboard_dir = math.Vec3.new(camera.direction.x, 0, camera.direction.z).norm();
+    const billboard_dir = math.Vec3.new(camera.direction.x, 0, camera.direction.z).scale(-1);
     const rot_matrix = math.Mat4.billboard(billboard_dir, camera.up);
 
     // make our grass, if needed
@@ -300,7 +301,7 @@ fn addClouds(density: f32) void {
     var random = rnd.random();
 
     // set up a matrix that will billboard to face the camera
-    const billboard_dir = math.Vec3.new(camera.direction.x, camera.direction.y, camera.direction.z).norm();
+    const billboard_dir = camera.direction.scale(-1);
     const rot_matrix = math.Mat4.billboard(billboard_dir, camera.up);
 
     cloud_batch.useShader(shader_blend);
@@ -408,4 +409,8 @@ fn on_draw() void {
 
 fn on_cleanup() !void {
     debug.log("Forest example module cleaning up", .{});
+    sprite_batch.deinit();
+    cloud_batch.deinit();
+    grass_batch.deinit();
+    shader_blend.destroy();
 }

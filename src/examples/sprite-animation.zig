@@ -5,7 +5,6 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 const graphics = delve.platform.graphics;
 
-var shader_default: graphics.Shader = undefined;
 var sprite_texture: graphics.Texture = undefined;
 
 var sprite_sheet: delve.graphics.sprites.AnimatedSpriteSheet = undefined;
@@ -13,6 +12,9 @@ var sprite_batch: delve.graphics.batcher.SpriteBatcher = undefined;
 var sprite_animation: delve.graphics.sprites.PlayingAnimation = undefined;
 
 var loop_delay_time: f32 = 0.0;
+
+var test_material: graphics.Material = undefined;
+var shader: graphics.Shader = undefined;
 
 // This example shows how to draw animated sprites out of a sprite sheet
 
@@ -32,7 +34,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try registerModule();
@@ -57,9 +60,22 @@ fn on_init() !void {
     };
     defer spritesheet_image.deinit();
 
-    // make the texture to draw and a default shader
-    sprite_texture = graphics.Texture.init(&spritesheet_image);
-    shader_default = graphics.Shader.initDefault(.{});
+    // make the texture to draw
+    sprite_texture = graphics.Texture.init(spritesheet_image);
+
+    // make our shader to draw with
+    shader = try graphics.Shader.initDefault(.{});
+
+    // make a material to draw with
+    test_material = try graphics.Material.init(.{
+        .shader = shader,
+        .texture_0 = sprite_texture,
+        .cull_mode = .BACK,
+        .blend_mode = .NONE, // no alpha blending
+        .samplers = &[_]graphics.FilterMode{.NEAREST}, // keep nice pixels!
+    });
+
+    delve.debug.log("Making spritesheet atlas", .{});
 
     // create a set of animations from our sprite sheet
     sprite_sheet = delve.graphics.sprites.AnimatedSpriteSheet.initFromGrid(1, 32, "cat_") catch {
@@ -94,9 +110,8 @@ fn on_draw() void {
     // clear the batch for this frame
     sprite_batch.reset();
 
-    // make sure we are using the right shader and texture
-    sprite_batch.useShader(shader_default);
-    sprite_batch.useTexture(sprite_texture);
+    // make sure we are using our material
+    sprite_batch.useMaterial(test_material);
 
     // add our sprite rectangle
     const rect = delve.spatial.Rect.new(cur_frame.offset, cur_frame.size);
@@ -117,5 +132,7 @@ fn on_cleanup() !void {
     delve.debug.log("Sprite animation example module cleaning up", .{});
     sprite_texture.destroy();
     sprite_batch.deinit();
-    shader_default.destroy();
+    sprite_sheet.deinit();
+    shader.destroy();
+    test_material.deinit();
 }

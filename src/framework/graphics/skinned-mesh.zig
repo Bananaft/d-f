@@ -212,8 +212,7 @@ pub const SkinnedMesh = struct {
         if (self.joint_transforms) |transforms| {
             transforms.deinit();
         }
-
-        self.bone_indices.clearAndFree();
+        self.bone_indices.deinit();
     }
 
     /// Draw this mesh
@@ -221,7 +220,7 @@ pub const SkinnedMesh = struct {
         if (self.joint_locations_dirty)
             self.applySkeletonTransforms();
 
-        self.mesh.material.params.joints = &self.joint_locations;
+        self.mesh.material.state.params.joints = &self.joint_locations;
         graphics.drawWithMaterial(&self.mesh.bindings, &self.mesh.material, cam_matrices, model_matrix);
     }
 
@@ -230,7 +229,7 @@ pub const SkinnedMesh = struct {
         if (self.joint_locations_dirty)
             self.applySkeletonTransforms();
 
-        self.mesh.material.params.joints = &self.joint_locations;
+        self.mesh.material.state.params.joints = &self.joint_locations;
         graphics.drawWithMaterial(&self.mesh.bindings, material, cam_matrices, model_matrix);
     }
 

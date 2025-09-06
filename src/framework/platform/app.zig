@@ -2,6 +2,7 @@ const std = @import("std");
 const app = @import("../app.zig");
 const debug = @import("../debug.zig");
 const gfx = @import("graphics.zig");
+const mem = @import("../mem.zig");
 const modules = @import("../modules.zig");
 const time = @import("std").time;
 const sokol_app_backend = @import("backends/sokol/app.zig");
@@ -56,12 +57,13 @@ const state = struct {
 };
 
 pub fn init() !void {
-    debug.log("App starting", .{});
+    debug.log("App platform starting", .{});
 
     AppBackend.init(.{
         .on_init_fn = on_init,
         .on_cleanup_fn = on_cleanup,
         .on_frame_fn = on_frame,
+        .on_resize_fn = on_resize,
     });
 
     state.game_loop_timer = try time.Timer.start();
@@ -69,7 +71,7 @@ pub fn init() !void {
 }
 
 pub fn deinit() void {
-    debug.log("App stopping", .{});
+    debug.log("App platform stopping", .{});
     AppBackend.deinit();
 }
 
@@ -129,6 +131,8 @@ fn on_cleanup() void {
     modules.cleanupModules();
     app.stopSubsystems();
     gfx.deinit();
+    debug.deinit();
+    mem.deinit();
 }
 
 fn on_frame() void {
@@ -168,6 +172,10 @@ fn on_frame() void {
 
     // keep under our FPS limit, if needed
     state.did_limit_fps = limitFps();
+}
+
+fn on_resize() void {
+    modules.onResizeModules();
 }
 
 fn limitFps() bool {

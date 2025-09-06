@@ -28,7 +28,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try registerModule();
@@ -66,7 +67,7 @@ fn on_init() !void {
     _ = try delve.fonts.loadFont("IBMPlexSerif", "assets/fonts/IBMPlexSerif-Regular.ttf", 1024, 200);
 
     // make a shader with alpha blending
-    shader_blend = graphics.Shader.initDefault(.{ .blend_mode = graphics.BlendMode.BLEND });
+    shader_blend = try graphics.Shader.initDefault(.{ .blend_mode = graphics.BlendMode.BLEND });
 }
 
 fn on_tick(delta: f32) void {
@@ -132,4 +133,6 @@ fn on_draw() void {
 
 fn on_cleanup() !void {
     debug.log("Fonts example module cleaning up", .{});
+    font_batch.deinit();
+    shader_blend.destroy();
 }

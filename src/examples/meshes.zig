@@ -23,12 +23,13 @@ const Color = colors.Color;
 const emissive_shader_builtin = delve.shaders.default_emissive;
 
 var time: f32 = 0.0;
-var mesh_test: ?mesh.Mesh = null;
 var camera: cam.Camera = undefined;
 
-// This example shows loading and drawing meshes
+var mesh_test: ?mesh.Mesh = null;
+var shader: delve.platform.graphics.Shader = undefined;
+var material: graphics.Material = undefined;
 
-// Web build note: this does not seem to work when built in --release=fast or --release=small
+// This example shows loading and drawing meshes
 
 pub fn main() !void {
     // Pick the allocator to use depending on platform
@@ -38,7 +39,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try registerModule();
@@ -65,7 +67,6 @@ fn on_init() !void {
     // Make a perspective camera, with a 90 degree FOV
     camera = cam.Camera.initThirdPerson(90.0, 0.01, 50.0, 5.0, Vec3.up);
     camera.position = Vec3.new(0.0, 0.0, 0.0);
-    camera.direction = Vec3.new(0.0, 0.0, 1.0);
 
     // Load the base color texture for the mesh
     const base_texture_file = "assets/meshes/SciFiHelmet_BaseColor_512.png";
@@ -73,7 +74,8 @@ fn on_init() !void {
         debug.log("Assets: Error loading image asset: {s}", .{base_texture_file});
         return;
     };
-    const tex_base = graphics.Texture.init(&base_img);
+    defer base_img.deinit();
+    const tex_base = graphics.Texture.init(base_img);
 
     // Load the emissive texture for the mesh
     const emissive_texture_file = "assets/meshes/SciFiHelmet_Emissive_512.png";
@@ -81,19 +83,15 @@ fn on_init() !void {
         debug.log("Assets: Error loading image asset: {s}", .{emissive_texture_file});
         return;
     };
-    const tex_emissive = graphics.Texture.init(&emissive_img);
+    defer emissive_img.deinit();
+    const tex_emissive = graphics.Texture.init(emissive_img);
 
     // Make our emissive shader from one that is pre-compiled
-    const shader = graphics.Shader.initFromBuiltin(.{ .vertex_attributes = mesh.getShaderAttributes() }, emissive_shader_builtin);
-
-    if (shader == null) {
-        debug.log("Could not get emissive shader", .{});
-        return;
-    }
+    shader = try graphics.Shader.initFromBuiltin(.{ .vertex_attributes = mesh.getShaderAttributes() }, emissive_shader_builtin);
 
     // Create a material out of our shader and textures
-    const material = graphics.Material.init(.{
-        .shader = shader.?,
+    material = try graphics.Material.init(.{
+        .shader = shader,
         .texture_0 = tex_base,
         .texture_1 = tex_emissive,
     });
@@ -123,7 +121,7 @@ fn on_draw() void {
     model = model.mul(Mat4.rotate(time * 0.6, Vec3.new(0.0, 1.0, 0.0)));
 
     const sin_val = std.math.sin(time * 0.006) + 0.5;
-    mesh_test.?.material.params.draw_color = Color.new(sin_val, sin_val, sin_val, 1.0);
+    mesh_test.?.material.state.params.draw_color = Color.new(sin_val, sin_val, sin_val, 1.0);
     mesh_test.?.draw(view_mats, model);
 
     model = Mat4.translate(Vec3.new(-2.0, 0.0, 0.0));
@@ -137,4 +135,6 @@ fn on_cleanup() !void {
         return;
 
     mesh_test.?.deinit();
+    material.deinit();
+    shader.destroy();
 }

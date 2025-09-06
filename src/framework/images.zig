@@ -19,8 +19,7 @@ pub fn deinit() void {
 }
 
 pub fn loadFile(file_path: [:0]const u8) !Image {
-    debug.log("Loading image from file: {s}", .{file_path});
-    defer debug.log("Done loading image from file: {s}", .{file_path});
+    debug.info("Loading image from file: {s}", .{file_path});
 
     // const file = try std.fs.cwd().openFile(
     //     file_path,
@@ -38,11 +37,10 @@ pub fn loadFile(file_path: [:0]const u8) !Image {
     //
     // return loadBytes(contents);
 
-    return Image.loadFromFile(file_path, 0);
+    return Image.loadFromFile(file_path, 4);
 }
 
 pub fn loadBytes(image_bytes: []const u8) !Image {
-    debug.log("Loading image bytes", .{});
-    defer debug.log("Done loading image bytes", .{});
-    return Image.loadFromMemory(image_bytes, 0);
+    debug.info("Loading image bytes", .{});
+    return Image.loadFromMemory(image_bytes, 4);
 }

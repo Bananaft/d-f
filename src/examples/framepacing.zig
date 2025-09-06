@@ -38,7 +38,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try registerModule();
@@ -73,7 +74,7 @@ fn on_init() !void {
         debug.log("Could not load test texture", .{});
         return;
     };
-    texture = graphics.Texture.init(&test_image);
+    texture = graphics.Texture.init(test_image);
 }
 
 fn on_tick(delta: f32) void {

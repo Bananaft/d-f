@@ -26,6 +26,10 @@ pub const Vec2 = extern struct {
         return Vec2{ .x = val[0], .y = val[1] };
     }
 
+    pub fn toArray(self: Vec2) [2]f32 {
+        return [_]f32{ self.x, self.y };
+    }
+
     pub fn new(x: f32, y: f32) Vec2 {
         return Vec2{ .x = x, .y = y };
     }
@@ -183,8 +187,8 @@ pub const Vec3 = extern struct {
         return Vec3.new(@max(left.x, right.x), @max(left.y, right.y), @max(left.z, right.z));
     }
 
-    pub fn toVec4(v: *const Vec3) Vec4 {
-        return Vec4.new(v.x, v.y, v.z, 0.0);
+    pub fn toVec4(v: *const Vec3, w: f32) Vec4 {
+        return Vec4.new(v.x, v.y, v.z, w);
     }
 
     pub const zero = Vec3.new(0.0, 0.0, 0.0);
@@ -283,6 +287,7 @@ pub const Vec4 = extern struct {
     pub const zero = Vec4.new(0.0, 0.0, 0.0, 1.0);
 };
 
+// Mat4: 4x4 matrix stored in row-major
 pub const Mat4 = extern struct {
     m: [4][4]f32,
 

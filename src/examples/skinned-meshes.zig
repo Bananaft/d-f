@@ -22,6 +22,7 @@ const Color = colors.Color;
 
 const shader_builtin = delve.shaders.default_skinned;
 
+var material: delve.platform.graphics.Material = undefined;
 var mesh_test: skinned_mesh.SkinnedMesh = undefined;
 var animation: skinned_mesh.PlayingAnimation = undefined;
 
@@ -36,8 +37,6 @@ var anim_idx: usize = 0;
 
 // This example shows loading and drawing animated meshes
 
-// Web build note: this does not seem to work when built in --release=fast or --release=small
-
 pub fn main() !void {
     // Pick the allocator to use depending on platform
     const builtin = @import("builtin");
@@ -46,7 +45,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try registerModule();
@@ -73,25 +73,22 @@ fn on_init() !void {
     // Make a perspective camera, with a 90 degree FOV
     camera = cam.Camera.initThirdPerson(90.0, 0.01, 150.0, 2.0, Vec3.up);
     camera.position = Vec3.new(0.0, 0.0, 0.0);
-    camera.direction = Vec3.new(0.0, 0.0, 1.0);
 
     // Make our emissive shader from one that is pre-compiled
-    const shader = graphics.Shader.initFromBuiltin(.{ .vertex_attributes = skinned_mesh.getSkinnedShaderAttributes() }, shader_builtin);
-
-    if (shader == null) {
-        debug.log("Could not get shader", .{});
-        return;
-    }
+    const shader = try graphics.Shader.initFromBuiltin(.{ .vertex_attributes = skinned_mesh.getSkinnedShaderAttributes() }, shader_builtin);
 
     var base_img: images.Image = images.loadFile(mesh_texture_file) catch {
         debug.log("Assets: Error loading image asset: {s}", .{mesh_texture_file});
         return;
     };
-    const tex_base = graphics.Texture.init(&base_img);
+    defer base_img.deinit();
+
+    const tex_base = graphics.Texture.init(base_img);
 
     // Create a material out of our shader and textures
-    const material = delve.platform.graphics.Material.init(.{
-        .shader = shader.?,
+    material = try delve.platform.graphics.Material.init(.{
+        .shader = shader,
+        .own_shader = true,
         .texture_0 = tex_base,
         .texture_1 = delve.platform.graphics.createSolidTexture(0x00000000),
 
@@ -174,6 +171,7 @@ fn on_draw() void {
 fn on_cleanup() !void {
     debug.log("Skinned mesh example module cleaning up", .{});
 
+    material.deinit();
     animation.deinit();
     mesh_test.deinit();
 }

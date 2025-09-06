@@ -40,6 +40,7 @@ pub const graphics = struct {
     pub const batcher = @import("graphics/batcher.zig");
     pub const camera = @import("graphics/camera.zig");
     pub const mesh = @import("graphics/mesh.zig");
+    pub const shaders = @import("graphics/shaders.zig");
     pub const skinned_mesh = @import("graphics/skinned-mesh.zig");
     pub const sprites = @import("graphics/sprites.zig");
 };
@@ -68,6 +69,7 @@ pub const spatial = struct {
 pub const utils = struct {
     pub const interpolation = @import("utils/interpolation.zig");
     pub const quakemap = @import("utils/quakemap.zig");
+    pub const quakemdl = @import("utils/quakemdl.zig");
 };
 
 // builtin shaders
@@ -89,4 +91,12 @@ pub const imgui = @import("cimgui");
 pub fn init(allocator: std.mem.Allocator) !void {
     mem.init(allocator);
     debug.log("Delve Framework Initialized", .{});
+}
+
+test {
+    // can run these via 'zig test src/framework/delve.zig'
+    @import("std").testing.refAllDecls(math);
+    @import("std").testing.refAllDecls(spatial);
+    @import("std").testing.refAllDecls(platform);
+    @import("std").testing.refAllDecls(utils);
 }

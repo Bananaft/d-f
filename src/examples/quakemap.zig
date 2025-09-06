@@ -8,11 +8,15 @@ const graphics = delve.platform.graphics;
 const math = delve.math;
 
 var camera: delve.graphics.camera.Camera = undefined;
+var shader: delve.platform.graphics.Shader = undefined;
 var fallback_material: graphics.Material = undefined;
+var fallback_quake_material: delve.utils.quakemap.QuakeMaterial = undefined;
+var materials: std.StringHashMap(delve.utils.quakemap.QuakeMaterial) = undefined;
 
 var quake_map: delve.utils.quakemap.QuakeMap = undefined;
 var map_meshes: std.ArrayList(delve.graphics.mesh.Mesh) = undefined;
 var entity_meshes: std.ArrayList(delve.graphics.mesh.Mesh) = undefined;
+
 var cube_mesh: delve.graphics.mesh.Mesh = undefined;
 
 var map_transform: math.Mat4 = undefined;
@@ -30,6 +34,7 @@ pub fn main() !void {
         .init_fn = on_init,
         .tick_fn = on_tick,
         .draw_fn = on_draw,
+        .cleanup_fn = on_cleanup,
     };
 
     // Pick the allocator to use depending on platform
@@ -39,7 +44,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try delve.modules.registerModule(example);
@@ -136,19 +142,24 @@ pub fn on_init() !void {
         \\}
     ;
 
-    map_transform = delve.math.Mat4.scale(delve.math.Vec3.new(0.1, 0.1, 0.1)).mul(delve.math.Mat4.rotate(-90, delve.math.Vec3.x_axis));
+    const translate = delve.math.Mat4.translate(delve.math.Vec3.x_axis.scale(10.0));
+    map_transform = delve.math.Mat4.scale(delve.math.Vec3.new(0.1, 0.1, 0.1)).mul(translate).mul(delve.math.Mat4.rotate(-90, delve.math.Vec3.x_axis));
 
     // const allocator = gpa.allocator();
     const allocator = std.heap.c_allocator;
     var err: delve.utils.quakemap.ErrorInfo = undefined;
     quake_map = try delve.utils.quakemap.QuakeMap.read(allocator, test_map_file, map_transform, &err);
 
+    shader = try graphics.Shader.initFromBuiltin(.{ .vertex_attributes = delve.graphics.mesh.getShaderAttributes() }, delve.shaders.default_mesh);
+
     // Create a material out of the texture
-    fallback_material = graphics.Material.init(.{
-        .shader = graphics.Shader.initDefault(.{ .vertex_attributes = delve.graphics.mesh.getShaderAttributes() }),
+    fallback_material = try graphics.Material.init(.{
+        .shader = shader,
         .texture_0 = fallback_tex,
         .samplers = &[_]graphics.FilterMode{.NEAREST},
     });
+
+    fallback_quake_material = .{ .material = fallback_material };
 
     // create our camera
     camera = delve.graphics.camera.Camera.initThirdPerson(90.0, 0.01, 512, 16.0, math.Vec3.up);
@@ -157,8 +168,7 @@ pub fn on_init() !void {
     // set our player position too
     player_pos = camera.position;
 
-    var materials = std.StringHashMap(delve.utils.quakemap.QuakeMaterial).init(allocator);
-    const shader = graphics.Shader.initDefault(.{ .vertex_attributes = delve.graphics.mesh.getShaderAttributes() });
+    materials = std.StringHashMap(delve.utils.quakemap.QuakeMaterial).init(allocator);
 
     for (quake_map.worldspawn.solids.items) |solid| {
         for (solid.faces.items) |face| {
@@ -182,9 +192,10 @@ pub fn on_init() !void {
                     try materials.put(mat_name_null, .{ .material = fallback_material });
                     continue;
                 };
-                const tex = graphics.Texture.init(&tex_img);
+                defer tex_img.deinit();
+                const tex = graphics.Texture.init(tex_img);
 
-                const mat = graphics.Material.init(.{
+                const mat = try graphics.Material.init(.{
                     .shader = shader,
                     .samplers = &[_]graphics.FilterMode{.NEAREST},
                     .texture_0 = tex,
@@ -197,8 +208,8 @@ pub fn on_init() !void {
     }
 
     // make meshes out of the quake map, one per material
-    map_meshes = try quake_map.buildWorldMeshes(allocator, math.Mat4.identity, materials, .{ .material = fallback_material });
-    entity_meshes = try quake_map.buildEntityMeshes(allocator, math.Mat4.identity, materials, .{ .material = fallback_material });
+    map_meshes = try quake_map.buildWorldMeshes(allocator, math.Mat4.identity, &materials, &fallback_quake_material);
+    entity_meshes = try quake_map.buildEntityMeshes(allocator, math.Mat4.identity, &materials, &fallback_quake_material);
 
     // make a bounding box cube
     cube_mesh = try delve.graphics.mesh.createCube(math.Vec3.new(0, 0, 0), bounding_box_size, delve.colors.red, fallback_material);
@@ -244,13 +255,13 @@ pub fn do_player_move(delta: f32) void {
         var dir = camera.direction;
         dir.y = 0.0;
         dir = dir.norm();
-        move_dir = move_dir.sub(dir);
+        move_dir = move_dir.add(dir);
     }
     if (delve.platform.input.isKeyPressed(.S)) {
         var dir = camera.direction;
         dir.y = 0.0;
         dir = dir.norm();
-        move_dir = move_dir.add(dir);
+        move_dir = move_dir.sub(dir);
     }
 
     // get our sideways input direction
@@ -317,4 +328,15 @@ pub fn do_player_move(delta: f32) void {
 pub fn setGravityCmd(new_gravity: f32) void {
     gravity = new_gravity;
     delve.debug.log("Changed gravity to {d}", .{gravity});
+}
+
+pub fn on_cleanup() !void {
+    var it = materials.valueIterator();
+    while (it.next()) |mat_ptr| {
+        mat_ptr.material.deinit();
+    }
+    materials.deinit();
+    shader.destroy();
+
+    quake_map.deinit();
 }

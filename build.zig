@@ -1,8 +1,11 @@
 const std = @import("std");
 const Build = std.Build;
+const builtin = @import("builtin");
 const ziglua = @import("ziglua");
 const sokol = @import("sokol");
 const system_sdk = @import("system-sdk");
+const fs = std.fs;
+const log = std.log;
 
 var target: Build.ResolvedTarget = undefined;
 var optimize: std.builtin.OptimizeMode = undefined;
@@ -58,6 +61,11 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
+    const dep_yamlz = b.dependency("ymlz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // inject the cimgui header search path into the sokol C library compile step
     const cimgui_root = dep_cimgui.namedWriteFiles("cimgui").getDirectory();
     dep_sokol.artifact("sokol_clib").addIncludePath(cimgui_root);
@@ -71,6 +79,7 @@ pub fn build(b: *std.Build) !void {
     const zaudio_item = .{ .module = dep_zaudio.module("root"), .name = "zaudio" };
     const cimgui_item = .{ .module = dep_cimgui.module("cimgui"), .name = "cimgui" };
     const stb_truetype_item = .{ .module = dep_stb_truetype.module("root"), .name = "stb_truetype" };
+    const ymlz_item = .{ .module = dep_yamlz.module("root"), .name = "ymlz" };
 
     const delve_module_imports = [_]ModuleImport{
         sokol_item,
@@ -80,6 +89,7 @@ pub fn build(b: *std.Build) !void {
         ziglua_item,
         cimgui_item,
         stb_truetype_item,
+        ymlz_item,
     };
 
     const link_libraries = [_]*Build.Step.Compile{
@@ -102,6 +112,9 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+
+    // Sokol module (exposed for using shader file outside of delve)
+    try b.modules.put("sokol", dep_sokol.module("sokol"));
 
     for (build_collection.add_imports) |build_import| {
         delve_mod.addImport(build_import.name, build_import.module);
@@ -161,6 +174,7 @@ pub fn build(b: *std.Build) !void {
         "meshes",
         "passes",
         "quakemap",
+        "quakemdl",
         "rays",
         "skinned-meshes",
         "stresstest",
@@ -169,6 +183,9 @@ pub fn build(b: *std.Build) !void {
     for (examples) |example_item| {
         try buildExample(b, example_item, delve_mod, delve_lib);
     }
+
+    // add the build shaders run step, to update the baked in default shaders
+    buildShaders(b);
 
     // TESTS
     const exe_tests = b.addTest(.{
@@ -276,4 +293,75 @@ pub fn getEmsdkSystemIncludePath(dep_sokol: *Build.Dependency) Build.LazyPath {
 pub fn emscriptenRunStep(b: *Build, name: []const u8, dep_sokol: *Build.Dependency) *Build.Step.Run {
     const emsdk = dep_sokol.builder.dependency("emsdk", .{});
     return sokol.emRunStep(b, .{ .name = name, .emsdk = emsdk });
+}
+// Adds a run step to compile shaders, expects the shader compiler in ../sokol-tools-bin/
+fn buildShaders(b: *Build) void {
+    const sokol_tools_bin_dir = "../sokol-tools-bin/bin/";
+    const shaders_dir = "assets/shaders/";
+    const shaders_out_dir = "src/framework/graphics/shaders/";
+
+    const shaders = .{
+        "basic-lighting",
+        "default",
+        "default-mesh",
+        "emissive",
+        "skinned-basic-lighting",
+        "skinned",
+    };
+
+    const optional_shdc: ?[:0]const u8 = comptime switch (builtin.os.tag) {
+        .windows => "win32/sokol-shdc.exe",
+        .linux => "linux/sokol-shdc",
+        .macos => if (builtin.cpu.arch.isX86()) "osx/sokol-shdc" else "osx_arm64/sokol-shdc",
+        else => null,
+    };
+
+    if (optional_shdc == null) {
+        std.log.warn("unsupported host platform, skipping shader compiler step", .{});
+        return;
+    }
+
+    const shdc_step = b.step("shaders", "Compile shaders (needs ../sokol-tools-bin)");
+    const shdc_path = sokol_tools_bin_dir ++ optional_shdc.?;
+    const slang = "glsl300es:glsl430:wgsl:metal_macos:metal_ios:metal_sim:hlsl4";
+
+    // build the .zig versions
+    inline for (shaders) |shader| {
+        const shader_with_ext = shader ++ ".glsl";
+        const cmd = b.addSystemCommand(&.{
+            shdc_path,
+            "-i",
+            shaders_dir ++ shader_with_ext,
+            "-o",
+            shaders_out_dir ++ shader_with_ext ++ ".zig",
+            "-l",
+            slang,
+            "-f",
+            "sokol_zig",
+            "--reflection",
+        });
+        shdc_step.dependOn(&cmd.step);
+    }
+
+    // build the yaml reflection versions
+    inline for (shaders) |shader| {
+        const shader_with_ext = shader ++ ".glsl";
+        fs.cwd().makePath(shaders_dir ++ "built/" ++ shader) catch |err| {
+            log.info("Could not create path {}", .{err});
+        };
+
+        const cmd = b.addSystemCommand(&.{
+            shdc_path,
+            "-i",
+            shaders_dir ++ shader_with_ext,
+            "-o",
+            shaders_dir ++ "built/" ++ shader ++ "/" ++ shader,
+            "-l",
+            slang,
+            "-f",
+            "bare_yaml",
+            "--reflection",
+        });
+        shdc_step.dependOn(&cmd.step);
+    }
 }

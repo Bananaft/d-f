@@ -3,8 +3,10 @@ const math = @import("../math.zig");
 const debug = @import("../debug.zig");
 const boundingbox = @import("boundingbox.zig");
 const assert = std.debug.assert;
+const testing = std.testing;
 
 const Vec3 = math.Vec3;
+const Vec4 = math.Vec4;
 
 // Based a lot on the LibGdx plane class
 
@@ -158,17 +160,16 @@ pub const Plane = struct {
     }
 
     pub fn mulMat4(self: *const Plane, transform: math.Mat4) Plane {
-        const origin = self.normal.scale(self.d);
-        const along = origin.add(self.normal);
+        const on_plane = self.normal.scale(-self.d).toVec4(1.0);
+        const normal = self.normal.toVec4(0.0);
 
-        // get a transformed origin and point down the plane normal direction
-        const origin_trans = origin.mulMat4(transform);
-        const along_trans = along.mulMat4(transform);
+        const transformed_on_plane = on_plane.mulMat4(transform).toVec3();
+        const transformed_normal = normal.mulMat4(transform.invert().transpose());
 
-        // make the new normal based on the new direction
-        const normal = along_trans.sub(origin_trans).norm();
+        const new_normal = transformed_normal.toVec3().norm();
+        const new_distance = -new_normal.dot(transformed_on_plane);
 
-        return Plane.init(normal, origin_trans.scale(-1));
+        return .{ .normal = new_normal, .d = new_distance };
     }
 };
 
@@ -242,10 +243,11 @@ test "Plane.planeIntersectPoint" {
 
 test "Plane.mulMat4" {
     const plane = Plane.init(Vec3.new(0, 0, 1), Vec3.new(1, 1, 1));
+    try testing.expectEqual(-1.0, plane.d);
 
     // multiplying by the identity should result in an identical plane
     const t1 = plane.mulMat4(math.Mat4.identity);
-    assert(std.meta.eql(plane, t1));
+    try testing.expectEqual(plane, t1);
 
     // scaling should keep the normal, but increase the distance
     const t2 = plane.mulMat4(math.Mat4.scale(Vec3.new(2, 2, 2)));
@@ -253,9 +255,9 @@ test "Plane.mulMat4" {
     assert(t2.d == plane.d * 2);
 
     // translating should also just change the distance
-    const t3 = plane.mulMat4(math.Mat4.translate(Vec3.new(1, 1, 1)));
-    assert(std.meta.eql(plane.normal, t3.normal));
-    assert(t3.d == 0);
+    const t3 = plane.mulMat4(math.Mat4.translate(Vec3.new(102, 6, 10)));
+    try testing.expectEqual(plane.normal, t3.normal);
+    try testing.expectEqual(-11.0, t3.d); // remember, d is stored negated
 
     // rotating should just change the normal
     const t4 = plane.mulMat4(math.Mat4.rotate(45, Vec3.new(1, 1, 1)));

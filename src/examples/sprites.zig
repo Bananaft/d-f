@@ -44,7 +44,8 @@ pub fn main() !void {
         // See https://github.com/ziglang/zig/issues/19072
         try delve.init(std.heap.c_allocator);
     } else {
-        try delve.init(gpa.allocator());
+        // Using the default allocator will let us detect memory leaks
+        try delve.init(delve.mem.createDefaultAllocator());
     }
 
     try registerModule();
@@ -86,22 +87,22 @@ fn on_init() !void {
     defer test_image_2.deinit();
 
     // make some textures from our images
-    texture_1 = graphics.Texture.init(&test_image_1);
-    texture_2 = graphics.Texture.init(&test_image_2);
+    texture_1 = graphics.Texture.init(test_image_1);
+    texture_2 = graphics.Texture.init(test_image_2);
 
     // make some shaders for testing
-    shader_opaque = graphics.Shader.initDefault(.{});
-    shader_blend = graphics.Shader.initDefault(.{ .blend_mode = graphics.BlendMode.BLEND });
+    shader_opaque = try graphics.Shader.initDefault(.{});
+    shader_blend = try graphics.Shader.initDefault(.{ .blend_mode = graphics.BlendMode.BLEND });
 
     // Create some test materials out of our shader and textures
-    test_material_1 = graphics.Material.init(.{
+    test_material_1 = try graphics.Material.init(.{
         .shader = shader_opaque,
         .texture_0 = graphics.tex_white,
         .cull_mode = .BACK,
         .blend_mode = .BLEND,
     });
 
-    test_material_2 = graphics.Material.init(.{
+    test_material_2 = try graphics.Material.init(.{
         .shader = shader_opaque,
         .texture_0 = texture_1,
         .cull_mode = .BACK,
@@ -112,7 +113,8 @@ fn on_init() !void {
 }
 
 fn on_tick(deltatime: f32) void {
-    _ = deltatime;
+    test_material_2.state.params.texture_pan.x += deltatime;
+    test_material_2.state.params.texture_pan.y += 0.5 * deltatime;
 
     if (input.isKeyJustPressed(.ESCAPE)) {
         papp.exit();
@@ -177,12 +179,12 @@ fn pre_draw() void {
 
     // test using materials as well!
     // test a filled rectangle
-    test_batch.useMaterial(&test_material_1);
+    test_batch.useMaterial(test_material_1);
     test_batch.setTransformMatrix(math.Mat4.translate(math.vec3(0, 0, -0.001)));
 
     test_batch.addRectangle(rect1, sprites.TextureRegion.default(), colors.cyan.mul(Color{ .a = 0.75 }));
 
-    test_batch.useMaterial(&test_material_2);
+    test_batch.useMaterial(test_material_2);
     test_batch.setTransformMatrix(math.Mat4.translate(math.vec3(1, -1, -0.001)));
 
     const rect3 = Rect.new(math.vec2(-1.0, 0), math.vec2(1, 1));
@@ -208,6 +210,8 @@ fn on_draw() void {
 fn on_cleanup() !void {
     debug.log("Batch example module cleaning up", .{});
     test_batch.deinit();
+    test_material_1.deinit();
+    test_material_2.deinit();
     texture_1.destroy();
     texture_2.destroy();
     shader_opaque.destroy();
